@@ -369,3 +369,13 @@ body > main {
     min-height: 44px;
   }
 }
+
+#campus-stores .tag.late {
+  background: var(--memo);
+  color: var(--memotxt);
+  font-weight: 650;
+}
+#campus-stores .page .record + .sectionhead,
+#campus-stores .page form[data-kit] {
+  margin-top: 14px;
+}

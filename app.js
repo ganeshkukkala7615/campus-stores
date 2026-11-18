@@ -1,5 +1,5 @@
 (() => {
-  const storageKey = "campus-stores.shift.v1";
+  const storageKey = "campus-stores.shift.v2";
   const root = document.getElementById("campus-stores");
   const q = (selector) => root.querySelector(selector);
   const requests = [
@@ -89,8 +89,15 @@
     ["Loan register", "book-open"],
     ["Desk book", "messages-square"],
   ];
+  const dueOptions = ["Fri 8 pm", "Sat 9 am", "Sat 10 am", "Sat noon"];
+  // Minutes from Friday 00:00, so the desk can tell when a slip is overdue.
+  const phaseMin = [945, 1170, 1980];
+  const dueMin = { "Fri 8 pm": 1200, "Sat 9 am": 1980, "Sat 10 am": 2040, "Sat noon": 2160 };
   const original = () => ({
-    version: 1,
+    version: 2,
+    kitFor: "",
+    returning: 0,
+    handoff: 0,
     tab: "Requests",
     phase: 0,
     selected: "",
@@ -111,6 +118,13 @@
     notice: "Sample shift · All records are fictional.",
   });
   let s = original();
+  const holderOf = (l) => l.holder || l.who;
+  const isLate = (l) => !l.back && (dueMin[l.due] ?? Infinity) < phaseMin[s.phase];
+  const late = () => '<span class="tag late">Overdue</span>';
+  const loanSub = (l) =>
+    l.req + " · " + holderOf(l) +
+    (l.holder && l.holder !== l.who ? " (issued to " + l.who + ")" : "") +
+    " · Due " + l.due + (l.expected ? " · expected back " + l.expected : "");
   const getAsset = (id) => assets.find((x) => x.id === id);
   const getReq = (id) => requests.find((x) => x.id === id);
   const out = (id) => s.loans.find((l) => l.asset === id && !l.back);
@@ -181,7 +195,8 @@
         r.items.map((x) => "<li>" + x + "</li>").join("") +
         "</ul><p>" +
         r.note +
-        "</p></div>";
+        "</p></div>" +
+        (s.kitFor === r.id ? kitForm(r) : kitStatus(r));
     } else
       html += requests
         .map((r) =>
@@ -193,6 +208,79 @@
         )
         .join("");
     return html;
+  }
+  const todoItems = (r) =>
+    r.items.filter(
+      (t) => !s.loans.some((l) => l.req === r.id && getAsset(l.asset).type === t),
+    );
+  function kitStatus(r) {
+    let html = '<div class="sectionhead"><div><h3>Kit status</h3><small>Every approved item, where it is, and who has it</small></div></div>';
+    html += r.items
+      .map((type) => {
+        const ls = s.loans.filter((l) => l.req === r.id && getAsset(l.asset).type === type);
+        const open = ls.find((l) => !l.back);
+        const done = ls.find((l) => l.back);
+        if (open)
+          return row(
+            type,
+            open.asset + " · L-" + open.num + " · with " + holderOf(open) +
+              (open.expected ? " · expected " + open.expected : " · due " + open.due),
+            (isLate(open) ? late() : "") + badge("Out"),
+          );
+        if (done)
+          return row(type, done.asset + " · L-" + done.num + " · returned", badge("Returned", true));
+        return row(type, "Approved · not issued yet", badge("Not issued"));
+      })
+      .join("");
+    if (todoItems(r).length)
+      html += '<div class="buttons">' + btn("Issue the whole kit", "kit", r.id, "primary") + "</div>";
+    return html;
+  }
+  function kitForm(r) {
+    const todo = todoItems(r);
+    const unitSelect = (type, i) => {
+      const free = assets.filter((a) => a.type === type && !a.repair && !out(a.id));
+      return (
+        "<label><span>" + esc(type) + '</span><select name="u' + i + '" required>' +
+        (free.length
+          ? opts(free.map((a) => [a.id, a.id + " · " + a.model + " · " + a.bin]))
+          : '<option value="">None on shelf</option>') +
+        "</select></label>"
+      );
+    };
+    return (
+      '<form data-kit="' + esc(r.id) + '"><div class="sectionhead"><div><h3>Issue kit · ' + esc(r.id) +
+      "</h3><small>One collector and one return time for every item. Units shown are on the shelf now.</small></div></div>" +
+      '<div class="form"><label><span>Collected by</span><select name="who" required><option value="">Select…</option>' +
+      opts(people.map((p) => [p, p])) + "</select></label>" +
+      '<label><span>Return by</span><select name="due" required>' +
+      opts(dueOptions.map((d) => [d, d])) + "</select></label>" +
+      todo.map(unitSelect).join("") +
+      '</div><div class="buttons"><button type="submit" class="primary">Issue ' + todo.length +
+      " item" + (todo.length > 1 ? "s" : "") + "</button>" + btn("Cancel", "cancel") + "</div></form>"
+    );
+  }
+  function returnPanel(l) {
+    const a = getAsset(l.asset);
+    const same = assets.filter((x) => x.type === a.type && !x.repair);
+    return (
+      '<form data-return class="record"><h3>Returning L-' + l.num + " · " + esc(a.type) + "</h3><p>The slip says " +
+      esc(a.id) + " (" + esc(a.model) + ", bin " + esc(a.bin) + "). Read the label on the unit in your hand.</p>" +
+      '<div class="form"><label><span>Unit being handed back</span><select name="unit">' +
+      same.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === a.id ? " selected" : "") + ">" + esc(x.id + " · " + x.model + " · " + x.bin) + "</option>").join("") +
+      '</select></label></div><div class="buttons"><button type="submit" class="primary">Confirm return</button>' +
+      btn("Not back yet: someone else has it", "holdopen", String(l.num)) + btn("Cancel", "cancel") + "</div></form>"
+    );
+  }
+  function handoffPanel(l) {
+    const a = getAsset(l.asset);
+    return (
+      '<form data-handoff class="record"><h3>L-' + l.num + " · " + esc(a.type) + " is still out</h3><p>Record who has it now so the next shift does not have to guess.</p>" +
+      '<div class="form"><label><span>Who has it now</span><select name="holder" required><option value="">Select…</option>' +
+      opts(people.map((p) => [p, p])) + '</select></label><label><span>Expected back</span><select name="expected" required><option value="">Select…</option>' +
+      opts(dueOptions.map((d) => [d, d])) + '</select></label></div><div class="buttons"><button type="submit" class="primary">Save and add to desk book</button>' +
+      btn("Cancel", "cancel") + "</div></form>"
+    );
   }
   function inventory() {
     let html = head(
@@ -228,6 +316,9 @@
         ? btn("Cancel", "cancel")
         : btn("New issue slip", "new", "", "primary"),
     );
+    const pending = s.loans.find((l) => l.num === (s.handoff || s.returning) && !l.back);
+    if (!s.editing && pending)
+      return html + (s.handoff ? handoffPanel(pending) : returnPanel(pending));
     if (s.editing) {
       const available = assets.filter((a) => !a.repair && !out(a.id));
       const select = (label, key, options) =>
@@ -287,10 +378,10 @@
     for (const l of shown)
       html += row(
         "L-" + l.num + " · " + l.asset,
-        l.req + " · " + l.who + " · Due " + l.due,
+        loanSub(l),
         l.back
           ? badge("Returned")
-          : btn("Record return", "return", String(l.num)),
+          : (isLate(l) ? late() : "") + btn("Record return", "return", String(l.num)),
       );
     return html;
   }
@@ -318,7 +409,7 @@
         "I brought the projector and speaker. Leela Das has our adapter. She’ll be at the counter at 9 am tomorrow.",
       ]);
     for (const n of s.notes)
-      entries.push([shifts[n.phase].time, "Counter handover", n.text]);
+      entries.push([shifts[n.phase].time, n.auto ? "Counter handover · logged from the register" : "Counter handover", n.text]);
     for (const [t, author, body] of entries.slice().reverse())
       html +=
         '<article class="record"><small>' +
@@ -363,6 +454,8 @@
       .join("");
     q("[data-page]").innerHTML = screens[s.tab]();
     if (q("[data-filter]")) q("[data-filter]").value = s.filter;
+    const kd = q('[data-kit] [name="due"]');
+    if (kd && s.kitFor) kd.value = getReq(s.kitFor).due;
     q("[data-status]").textContent = s.notice;
   }
   function commit(msg) {
@@ -390,18 +483,27 @@
       case "tab":
         s.tab = v;
         s.editing = false;
+        s.kitFor = "";
+        s.returning = s.handoff = 0;
         break;
       case "close":
         s.selected = "";
+        s.kitFor = "";
         break;
       case "request":
         s.selected = v;
+        s.kitFor = "";
+      break;
+      case "kit":
+        s.kitFor = v;
         break;
       case "new":
         s.editing = true;
         break;
       case "cancel":
         s.editing = false;
+        s.kitFor = "";
+        s.returning = s.handoff = 0;
         break;
       case "scope":
         s.onlyOpen = v === "0";
@@ -409,10 +511,14 @@
       case "return": {
         const l = s.loans.find((l) => l.num === Number(v));
         if (!l || l.back) return;
-        l.back = true;
-        s.notice = l.asset + " returned to stock. Slip L-" + l.num + " closed.";
+        s.returning = l.num;
+        s.handoff = 0;
+        s.notice = "Check the unit in your hand against slip L-" + l.num + ".";
         break;
       }
+      case "holdopen":
+        s.handoff = Number(v);
+        break;
     }
     commit();
   });
@@ -431,6 +537,58 @@
       if (!text) return;
       s.notes.push({ phase: s.phase, text });
       commit("Handover note saved.");
+      return;
+    }
+    if (f.matches("[data-kit]")) {
+      const r = getReq(f.dataset.kit);
+      const who = form.get("who"), due = form.get("due");
+      const todo = r ? todoItems(r) : [];
+      const picks = todo.map((t, i) => getAsset(form.get("u" + i)));
+      if (!r || !todo.length || !people.includes(who) || !dueOptions.includes(due)) return;
+      if (picks.some((u, i) => !u || u.type !== todo[i] || u.repair || out(u.id))) {
+        q("[data-status]").textContent = "A selected unit is not on the shelf. Choose again.";
+        return;
+      }
+      let num = Math.max(...s.loans.map((l) => l.num));
+      const made = picks.map((u) => {
+        s.loans.push({ num: ++num, req: r.id, asset: u.id, who, due, back: false });
+        return u.id + " (L-" + num + ")";
+      });
+      s.kitFor = "";
+      commit("Issued " + made.join(", ") + " to " + who + " for " + r.id + ".");
+      return;
+    }
+    if (f.matches("[data-return]")) {
+      const l = s.loans.find((l) => l.num === s.returning && !l.back);
+      const unit = getAsset(form.get("unit"));
+      if (!l || !unit || unit.repair || unit.type !== getAsset(l.asset).type) return;
+      if (unit.id !== l.asset) {
+        if (out(unit.id)) {
+          q("[data-status]").textContent = unit.id + " is on another open slip. Check the label again.";
+          return;
+        }
+        const was = l.asset;
+        l.asset = unit.id;
+        l.back = true;
+        s.notes.push({ phase: s.phase, auto: true, text: "Slip L-" + l.num + " corrected: " + unit.id + " came back, the slip said " + was + ". Check that " + was + " is on its shelf (" + getAsset(was).bin + ")." });
+        s.returning = 0;
+        commit("Slip L-" + l.num + " corrected to " + unit.id + " and closed. Note added to the desk book.");
+        return;
+      }
+      l.back = true;
+      s.returning = 0;
+      commit(l.asset + " returned to stock. Slip L-" + l.num + " closed.");
+      return;
+    }
+    if (f.matches("[data-handoff]")) {
+      const l = s.loans.find((l) => l.num === s.handoff && !l.back);
+      const holder = form.get("holder"), expected = form.get("expected");
+      if (!l || !people.includes(holder) || !dueOptions.includes(expected)) return;
+      l.holder = holder;
+      l.expected = expected;
+      s.notes.push({ phase: s.phase, auto: true, text: getAsset(l.asset).type + " (" + l.asset + ", slip L-" + l.num + ") for " + l.req + " is with " + holder + ", expected back " + expected + ". It was due " + l.due + "." });
+      s.handoff = s.returning = 0;
+      commit("L-" + l.num + " is with " + holder + ". Handover line added to the desk book.");
       return;
     }
     if (!f.matches("[data-issue]")) return;
@@ -463,7 +621,7 @@
   function restore(d) {
     if (
       !d ||
-      d.version !== 1 ||
+      d.version !== 2 ||
       !Object.hasOwn(screens, d.tab) ||
       !shifts[d.phase] ||
       (d.selected && !getReq(d.selected)) ||
