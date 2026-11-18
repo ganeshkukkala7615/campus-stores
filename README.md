@@ -19,7 +19,9 @@ At 3:45 pm the register's unit list leaves out PR-06 (in repair), and the app re
 - At 9 am, **Record return** closed L-404 and put AD-12 back on the shelf without asking which adapter Leela actually held. AD-12 and AD-15 are both in bin C4, so a wrong close leaves the register and the shelf disagreeing, and nobody finds out until the next loan.
 
 ## The change
-
+- **Overdue on the request row.** The Requests list flags a request with an overdue unit, so the morning shift sees it before opening anything.
+- **Open at handover.** The top of the Desk book lists every unit still out with holder, due time and expected-back time. Free-text notes still work below it.
+- **The request note stays in view.** *Issue the whole kit* opens under the request's own note ("USB-C-only laptop"), so it is visible when the adapter is picked.
 The desk works from the **request**, not from one slip at a time.
 
 - **Kit status** on the request: each approved item as *Not issued / Out (unit, slip, holder, expected back) / Returned*, with an *Overdue* flag.
